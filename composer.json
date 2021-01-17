@@ -1,6 +1,6 @@
 {
     "name": "wind-framework/redis",
-    "description": "Wind framework base core.",
+    "description": "Wind framework coroutine redis client.",
     "type": "library",
     "version": "0.1.0",
     "require": {
