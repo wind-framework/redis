@@ -13,7 +13,7 @@ use function Amp\call;
 
 /**
  * Redis 协程客户端
- * 
+ *
  * Strings methods
  * @method Promise append($key, $value) int
  * @method Promise bitCount($key) int
@@ -164,9 +164,6 @@ use function Amp\call;
  * Generic methods
  * @method Promise rawCommand(...$commandAndArgs)
  * Transactions methods
- * @method \Redis multi()
- * @method Promise exec()
- * @method Promise discard()
  * @method Promise watch($keys)
  * @method Promise unwatch($keys)
  * Scripting methods
@@ -195,6 +192,13 @@ class Redis
 
     private $redis;
     private $connectPromise;
+
+    /**
+     * MULTI Transcation Deferred
+     *
+     * @var Deferred|null
+     */
+    private $multi;
 
     public function __construct(Config $config)
     {
@@ -236,6 +240,60 @@ class Redis
     {
         $this->redis->close();
         return new Success();
+    }
+
+    /**
+     * Begin a redis transcation
+     *
+     * @return Promise
+     */
+    public function multi()
+    {
+        return call(function() {
+            if ($this->multi) {
+                yield $this->multi->promise();
+            }
+            $this->multi = new Deferred;
+            $this->multi->promise()->onResolve(function() {
+                $this->multi = null;
+            });
+            return yield $this->__call('multi', []);
+        });
+    }
+
+    /**
+     * Commit transcation
+     *
+     * @return Promise
+     */
+    public function exec()
+    {
+        return call(function() {
+            if (!$this->multi) {
+                throw new Exception('Not in multi statement.');
+            }
+
+            yield $this->__call('exec', []);
+            $this->multi->resolve();
+        });
+    }
+
+    /**
+     * Discard transcation
+     *
+     * @return Promise
+     */
+    public function discard()
+    {
+        return call(function() {
+            if (!$this->multi) {
+                throw new Exception('Not in multi statement.');
+            }
+
+            yield $this->__call('discard', []);
+            $this->multi->resolve();
+            $this->multi = null;
+        });
     }
 
     public function __call($name, $args)
