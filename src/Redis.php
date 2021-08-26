@@ -190,15 +190,19 @@ use function Amp\call;
 class Redis
 {
 
+    /**
+     * Workerman Redis Client
+     * @var Client
+     */
     private $redis;
     private $connectPromise;
 
     /**
-     * MULTI Transcation Deferred
+     * MULTI Transcation Promise
      *
-     * @var Deferred|null
+     * @var Promise|null
      */
-    private $multi;
+    private $pending;
 
     public function __construct(Config $config)
     {
@@ -243,70 +247,63 @@ class Redis
     }
 
     /**
-     * Begin a redis transcation
+     * Begin Transcation use Multi
      *
-     * @return Promise
-     */
-    public function multi()
-    {
-        return call(function() {
-            if ($this->multi) {
-                yield $this->multi->promise();
-            }
-            $this->multi = new Deferred;
-            $this->multi->promise()->onResolve(function() {
-                $this->multi = null;
-            });
-            return yield $this->__call('multi', []);
-        });
-    }
-
-    /**
-     * Commit transcation
+     * Other operate with this redis connection will be block until transcation finished.
      *
-     * @return Promise
-     */
-    public function exec()
-    {
-        return call(function() {
-            if (!$this->multi) {
-                throw new Exception('Not in multi statement.');
-            }
-
-            yield $this->__call('exec', []);
-            $this->multi->resolve();
-        });
-    }
-
-    /**
-     * Discard transcation
+     * @param callable $inTranscationCallback Callback to run in transcation code, support coroutine.
      *
-     * @return Promise
+     * ATTENTION: **DO NOT** get value by redis client in transcation, every operate in transcation will return `QUEUED`.
+     *
+     * Example:
+     * ```
+     * $redis->transcation(function($transcation) {
+     *     yield $transcation->hSet('key', 'name', 'value');
+     *     yield $this->lPush('key', 'value');
+     * });
+     * ```
+     * @return Promise Return the result of $inTranscationCallback returned.
      */
-    public function discard()
+    public function transcation(callable $inTranscationCallback)
     {
-        return call(function() {
-            if (!$this->multi) {
-                throw new Exception('Not in multi statement.');
-            }
+        return call(function() use ($inTranscationCallback) {
+            $this->pending && yield $this->pending;
 
-            yield $this->__call('discard', []);
-            $this->multi->resolve();
-            $this->multi = null;
+            $defer = new Deferred;
+            $this->pending = $defer->promise();
+
+            $transcation = new Transcation($this->redis);
+            yield $transcation->multi();
+
+            try {
+                $result = yield call($inTranscationCallback, $transcation);
+                yield $transcation->exec();
+                return $result;
+            } catch (\Throwable $e) {
+                yield $transcation->discard();
+                throw $e;
+            } finally {
+                $defer->resolve();
+                $this->pending = $transcation = null;
+            }
         });
     }
 
     public function __call($name, $args)
     {
-        $defer = new Deferred;
+        return call(function() use ($name, $args) {
+            $this->pending && yield $this->pending;
 
-        $args[] = function($result) use ($defer) {
-            $defer->resolve($result);
-        };
+            $defer = new Deferred;
 
-        call_user_func_array([$this->redis, $name], $args);
+            $args[] = function($result) use ($defer) {
+                $defer->resolve($result);
+            };
 
-        return $defer->promise();
+            call_user_func_array([$this->redis, $name], $args);
+
+            return $defer->promise();
+        });
     }
 
 }
