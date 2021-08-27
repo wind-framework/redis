@@ -3,17 +3,18 @@
 namespace Wind\Redis;
 
 use Amp\Deferred;
+use Amp\Promise;
 use Workerman\Redis\Client;
 
 /**
- * Redis Transcation
+ * Redis Transaction
  *
  * @mixin Redis
  * @method Promise multi()
  * @method Promise exec()
  * @method Promise discard()
  */
-class Transcation
+class Transaction
 {
 
     private $redis;

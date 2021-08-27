@@ -198,7 +198,7 @@ class Redis
     private $connectPromise;
 
     /**
-     * MULTI Transcation Promise
+     * MULTI Transaction Promise
      *
      * @var Promise|null
      */
@@ -247,44 +247,44 @@ class Redis
     }
 
     /**
-     * Begin Transcation use Multi
+     * Begin Transaction use Multi
      *
-     * Other operate with this redis connection will be block until transcation finished.
+     * Other operate with this redis connection will be block until transaction finished.
      *
-     * @param callable $inTranscationCallback Callback to run in transcation code, support coroutine.
+     * @param callable $inTransactionCallback Callback to run in transaction code, support coroutine.
      *
-     * ATTENTION: **DO NOT** get value by redis client in transcation, every operate in transcation will return `QUEUED`.
+     * ATTENTION: **DO NOT** get value by redis client in transaction, every operate in transaction will return `QUEUED`.
      *
      * Example:
      * ```
-     * $redis->transcation(function($transcation) {
-     *     yield $transcation->hSet('key', 'name', 'value');
+     * $redis->transaction(function($transaction) {
+     *     yield $transaction->hSet('key', 'name', 'value');
      *     yield $this->lPush('key', 'value');
      * });
      * ```
-     * @return Promise Return the result of $inTranscationCallback returned.
+     * @return Promise Return the result of $inTransactionCallback returned.
      */
-    public function transcation(callable $inTranscationCallback)
+    public function transaction(callable $inTransactionCallback)
     {
-        return call(function() use ($inTranscationCallback) {
+        return call(function() use ($inTransactionCallback) {
             $this->pending && yield $this->pending;
 
             $defer = new Deferred;
             $this->pending = $defer->promise();
 
-            $transcation = new Transcation($this->redis);
-            yield $transcation->multi();
+            $transaction = new Transaction($this->redis);
+            yield $transaction->multi();
 
             try {
-                $result = yield call($inTranscationCallback, $transcation);
-                yield $transcation->exec();
+                $result = yield call($inTransactionCallback, $transaction);
+                yield $transaction->exec();
                 return $result;
             } catch (\Throwable $e) {
-                yield $transcation->discard();
+                yield $transaction->discard();
                 throw $e;
             } finally {
                 $defer->resolve();
-                $this->pending = $transcation = null;
+                $this->pending = $transaction = null;
             }
         });
     }
