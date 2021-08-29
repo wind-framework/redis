@@ -2,9 +2,9 @@
     "name": "wind-framework/redis",
     "description": "Wind framework coroutine redis client.",
     "type": "library",
-    "version": "0.1.1",
+    "version": "1.0.0-dev",
     "require": {
-        "wind-framework/wind-framework": "~0.1",
+        "wind-framework/wind-framework": "1.0.0-dev",
         "workerman/redis": "^1.0"
     },
     "license": "Apache-2.0",

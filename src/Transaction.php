@@ -6,6 +6,8 @@ use Amp\Deferred;
 use Amp\Promise;
 use Workerman\Redis\Client;
 
+use function Amp\await;
+
 /**
  * Redis Transaction
  *
@@ -28,13 +30,13 @@ class Transaction
     {
         $defer = new Deferred;
 
-        $args[] = function($result) use ($defer) {
+        $args[] = static function($result) use ($defer) {
             $defer->resolve($result);
         };
 
         call_user_func_array([$this->redis, $name], $args);
 
-        return $defer->promise();
+        return await($defer->promise());
     }
 
 }
