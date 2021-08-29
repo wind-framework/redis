@@ -131,7 +131,7 @@ use function Amp\await;
  * @method double zScore($key, $member)
  * @method int zunionstore($keyOutput, $arrayZSetKeys, $arrayWeights = [], $aggregateFunction = '')
  * @method false|array zScan($key, $iterator, $pattern = '', $count = 0)
- * @method Promise sort($key, $options)
+ * @method void sort($key, $options)
  * HyperLogLogs methods
  * @method int pfAdd($key, $values)
  * @method int pfCount($keys)
@@ -148,8 +148,8 @@ use function Amp\await;
  * @method string xAdd($strKey, $strId, $arrMessage, $iMaxLen = 0, $booApproximate = false)
  * @method array xClaim($strKey, $strGroup, $strConsumer, $minIdleTime, $arrIds, $arrOptions = [])
  * @method int xDel($strKey, $arrIds)
- * @method Promise xGroup($command, $strKey, $strGroup, $strMsgId, $booMKStream = null)
- * @method Promise xInfo($command, $strStream, $strGroup = null)
+ * @method void xGroup($command, $strKey, $strGroup, $strMsgId, $booMKStream = null)
+ * @method void xInfo($command, $strStream, $strGroup = null)
  * @method int xLen($stream)
  * @method array xPending($strStream, $strGroup, $strStart = 0, $strEnd = 0, $iCount = 0, $strConsumer = null)
  * @method array xRange($strStream, $strStart, $strEnd, $iCount = 0)
@@ -158,33 +158,33 @@ use function Amp\await;
  * @method array xRevRange($strStream, $strEnd, $strStart, $iCount = 0)
  * @method int xTrim($strStream, $iMaxLen, $booApproximate = null)
  * Pub/sub methods
- * @method Promise publish($channel, $message)
- * @method Promise pubSub($keyword, $argument = null)
+ * @method void publish($channel, $message)
+ * @method void pubSub($keyword, $argument = null)
  * Generic methods
- * @method Promise rawCommand(...$commandAndArgs)
+ * @method void rawCommand(...$commandAndArgs)
  * Transactions methods
- * @method Promise watch($keys)
- * @method Promise unwatch($keys)
+ * @method void watch($keys)
+ * @method void unwatch($keys)
  * Scripting methods
- * @method Promise eval($script, $args = [], $numKeys = 0)
- * @method Promise evalSha($sha, $args = [], $numKeys = 0)
- * @method Promise script($command, ...$scripts)
- * @method Promise client(...$args)
- * @method Promise getLastError() null|string
- * @method Promise clearLastError() bool
- * @method Promise _prefix($value)
- * @method Promise _serialize($value)
- * @method Promise _unserialize($value)
+ * @method void eval($script, $args = [], $numKeys = 0)
+ * @method void evalSha($sha, $args = [], $numKeys = 0)
+ * @method void script($command, ...$scripts)
+ * @method void client(...$args)
+ * @method null|string getLastError()
+ * @method bool clearLastError()
+ * @method void _prefix($value)
+ * @method void _serialize($value)
+ * @method void _unserialize($value)
  * Introspection methods
- * @method Promise isConnected() bool
- * @method Promise getHost()
- * @method Promise getPort()
- * @method Promise getDbNum() false|int
- * @method Promise getTimeout() false|double
- * @method Promise getReadTimeout()
- * @method Promise getPersistentID()
- * @method Promise getAuth()
- * @method Promise select($db)
+ * @method bool isConnected()
+ * @method void getHost()
+ * @method void getPort()
+ * @method false|int getDbNum()
+ * @method false|double getTimeout()
+ * @method void getReadTimeout()
+ * @method void getPersistentID()
+ * @method void getAuth()
+ * @method void select($db)
  */
 class Redis
 {
