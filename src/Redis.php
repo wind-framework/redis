@@ -167,8 +167,8 @@ use function Amp\call;
  * @method Promise watch($keys)
  * @method Promise unwatch($keys)
  * Scripting methods
- * @method Promise eval($script, $args = [], $numKeys = 0)
- * @method Promise evalSha($sha, $args = [], $numKeys = 0)
+ * @method Promise eval($script, $numKeys, ...$args=[])
+ * @method Promise evalSha($sha1, $numKeys, ...$args=[])
  * @method Promise script($command, ...$scripts)
  * @method Promise client(...$args)
  * @method Promise getLastError() null|string
@@ -296,8 +296,12 @@ class Redis
 
             $defer = new Deferred;
 
-            $args[] = function($result) use ($defer) {
-                $defer->resolve($result);
+            $args[] = static function($result, $redis) use ($defer) {
+                if ($result !== false) {
+                    $defer->resolve($result);
+                } else {
+                    $defer->fail(new Exception($redis->error()));
+                }
             };
 
             call_user_func_array([$this->redis, $name], $args);
