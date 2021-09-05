@@ -262,7 +262,7 @@ class Redis
      *     $this->lPush('key', 'value');
      * });
      * ```
-     * @return Promise Return the result of $inTransactionCallback returned.
+     * @return array Return the results of every command in $inTransactionCallback returned.
      */
     public function transaction(callable $inTransactionCallback)
     {
