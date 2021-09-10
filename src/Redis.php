@@ -3,12 +3,12 @@
 namespace Wind\Redis;
 
 use Amp\Deferred;
-use Amp\Success;
 use Amp\Promise;
+use Amp\Success;
 use Wind\Base\Config;
+use Wind\Base\Countdown;
 use Workerman\Redis\Client;
 use Workerman\Redis\Exception;
-
 use function Amp\call;
 
 /**
@@ -197,10 +197,13 @@ class Redis
     private $redis;
     private $connectPromise;
 
+    private $lastTrans;
+    private $transCount = 0;
+
     /**
-     * MULTI Transaction Promise
+     * MULTI Transaction Countdown before call
      *
-     * @var Promise|null
+     * @var Countdown|null
      */
     private $pending;
 
@@ -267,10 +270,16 @@ class Redis
     public function transaction(callable $inTransactionCallback)
     {
         return call(function() use ($inTransactionCallback) {
-            $this->pending && yield $this->pending;
-
             $defer = new Deferred;
-            $this->pending = $defer->promise();
+
+            $lastTrans = $this->lastTrans;
+            $this->lastTrans = $defer->promise();
+            ++$this->transCount;
+
+            if ($lastTrans !== null) {
+                yield $lastTrans;
+                $lastTrans = null;
+            }
 
             $transaction = new Transaction($this->redis);
             yield $transaction->multi();
@@ -283,8 +292,11 @@ class Redis
                 yield $transaction->discard();
                 throw $e;
             } finally {
+                if ($this->pending !== null && $this->pending->countdown() == 0) {
+                    $this->pending = null;
+                }
+                --$this->transCount;
                 $defer->resolve();
-                $this->pending = $transaction = null;
             }
         });
     }
@@ -292,7 +304,12 @@ class Redis
     public function __call($name, $args)
     {
         return call(function() use ($name, $args) {
-            $this->pending && yield $this->pending;
+            if ($this->transCount > 0) {
+                if ($this->pending === null) {
+                    $this->pending = new Countdown($this->transCount);
+                }
+                yield $this->pending->promise();
+            }
 
             $defer = new Deferred;
 
