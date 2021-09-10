@@ -198,6 +198,12 @@ class Redis
     private $connectPromise;
 
     private $lastTrans;
+
+    /**
+     * 当前有多少正在排队、执行中的事务
+     *
+     * @var int
+     */
     private $transCount = 0;
 
     /**
@@ -272,10 +278,13 @@ class Redis
         return call(function() use ($inTransactionCallback) {
             $defer = new Deferred;
 
+            //将当前事务标记为下一个事务的前一个任务，让其等待此事务完成才能开始执行自己的事务
             $lastTrans = $this->lastTrans;
             $this->lastTrans = $defer->promise();
+
             ++$this->transCount;
 
+            //等待前一个事务完成
             if ($lastTrans !== null) {
                 yield $lastTrans;
                 $lastTrans = null;
@@ -292,6 +301,7 @@ class Redis
                 yield $transaction->discard();
                 throw $e;
             } finally {
+                //每个事务完成后都减小独立命令（非事务命令）的前置等待事务数计数
                 if ($this->pending !== null && $this->pending->countdown() == 0) {
                     $this->pending = null;
                 }
@@ -304,7 +314,15 @@ class Redis
     public function __call($name, $args)
     {
         return call(function() use ($name, $args) {
+            //等待队列中的事务完成后才开始发送消息
+            //如果事务未完成，由于共用一个消息，此时发送会导致命令实际在 MULTI 生效范围内发送，
+            //这种情况下会导致返回 "QUEUED" 问题。
             if ($this->transCount > 0) {
+                //如果没有命令等待，则以当前排队的事务数为基数进行倒数，每个事务执行完后会减小此倒数
+                //这样做法的好处是不必反复等待后面新排队进来的事务，而只需等待这一刻之前的事务完成即可
+                //但有个问题，如果后面有新排队进来的事务，且前面的事务没有完成前，再往后排进来的独立命令都会加塞到此处执行，
+                //导致后面的事务靠后执行，因为这种方式只支持一份独立命令的排队($this->>pending)
+                //不过庆幸的是，前面的事务一旦执行完成，这个问题就会终止，新来的独立命令会继续往后排。
                 if ($this->pending === null) {
                     $this->pending = new Countdown($this->transCount);
                 }
