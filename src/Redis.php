@@ -5,10 +5,11 @@ namespace Wind\Redis;
 use Amp\Deferred;
 use Amp\Promise;
 use Amp\Success;
-use Wind\Base\Config;
 use Wind\Base\Countdown;
+use Wind\Utils\ArrayUtil;
 use Workerman\Redis\Client;
 use Workerman\Redis\Exception;
+use function Amp\asyncCoroutine;
 use function Amp\call;
 
 /**
@@ -195,8 +196,30 @@ class Redis
      * @var Client
      */
     private $redis;
-    private $connectPromise;
 
+    /**
+     * Redis host config
+     *
+     * @var array
+     */
+    private $config;
+
+    /**
+     * Connect status
+     *
+     * Promise: Connecting
+     * true: Connected
+     * false: Connect failed
+     *
+     * @var Promise|bool
+     */
+    private $connector = false;
+
+    /**
+     * Last transaction promise
+     *
+     * @var Promise
+     */
     private $lastTrans;
 
     /**
@@ -213,40 +236,62 @@ class Redis
      */
     private $pending;
 
-    public function __construct(Config $config)
+    public function __construct($config='default')
     {
-        $conf = $config->get('redis.default');
+        $this->config = config('redis.'.$config);
 
-        $defer = new Deferred;
-        $this->redis = new Client("redis://{$conf['host']}:{$conf['port']}", [], function($status, $redis) use ($defer, $conf) {
-            if ($status) {
-                if ($conf['auth'] || $conf['db']) {
-                    call(function() use ($conf) {
-                        if ($conf['auth']) {
-                            $r = yield $this->auth($conf['auth']);
-                            if (!$r) {
-                                throw new Exception("Auth failed to redis {$conf['host']}:{$conf['port']}.");
-                            }
-                        }
-                        if ($conf['db'] && $conf['db'] != 0) {
-                            yield $this->select($conf['db']);
-                        }
-                    })->onResolve(function($e) use ($defer) {
-                        $e ? $defer->fail($e) : $defer->resolve();
-                    });
-                } else {
-                    $defer->resolve();
-                }
-            } else {
-                $defer->fail(new Exception("Connected to redis server error."));
-            }
-        });
-        $this->connectPromise = $defer->promise();
+        if ($this->config === null) {
+            throw new Exception("Unable to find config for redis '$config'.");
+        }
+
+        Promise\rethrow($this->connect());
     }
 
     public function connect()
     {
-        return $this->connectPromise;
+        if ($this->connector === true) {
+            return new Success();
+        }
+
+        if ($this->connector instanceof Promise) {
+            return $this->connector;
+        }
+
+        $defer = new Deferred;
+
+        $options = ArrayUtil::intersectKeys($this->config, ['connect_timeout', 'wait_timeout', 'context']);
+
+        $this->redis = new Client("redis://{$this->config['host']}:{$this->config['port']}", $options, asyncCoroutine(function($status) use ($defer) {
+            $error = null;
+
+            if (!$status) {
+                $error = new Exception($this->redis->error());
+                goto Error;
+            }
+
+            if ($this->config['auth'] || $this->config['db']) {
+                try {
+                    //Password auth
+                    $this->config['auth'] && yield $this->auth($this->config['auth']);
+                    //Select DB
+                    $this->config['db'] && yield $this->select($this->config['db']);
+                } catch (\Throwable $e) {
+                    $error = $e;
+                    goto Error;
+                }
+            }
+
+            //Success
+            $defer->resolve();
+            $this->connector = true;
+            return;
+
+            Error:
+            $defer->fail($error);
+            $this->connector = false;
+        }));
+
+        return $this->connector = $defer->promise();
     }
 
     public function close()
@@ -314,6 +359,10 @@ class Redis
     public function __call($name, $args)
     {
         return call(function() use ($name, $args) {
+            if ($this->connector instanceof Promise && $name != 'auth' && $name != 'select') {
+                yield $this->connector;
+            }
+
             //等待队列中的事务完成后才开始发送消息
             //如果事务未完成，由于共用一个消息，此时发送会导致命令实际在 MULTI 生效范围内发送，
             //这种情况下会导致返回 "QUEUED" 问题。
