@@ -236,12 +236,12 @@ class Redis
      */
     private $pending;
 
-    public function __construct($config='default')
+    public function __construct($connection='default')
     {
-        $this->config = config('redis.'.$config);
+        $this->config = config('redis.'.$connection);
 
         if ($this->config === null) {
-            throw new Exception("Unable to find config for redis '$config'.");
+            throw new Exception("Unable to find config for redis connection '$connection'.");
         }
 
         Promise\rethrow($this->connect());
