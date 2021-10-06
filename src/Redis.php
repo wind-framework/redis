@@ -234,14 +234,14 @@ class Redis
     /**
      * Create redis connection instance
      *
-     * @param string $name Redis connection config index name.
+     * @param string $connection Redis connection config index name.
      */
-    public function __construct($config='default')
+    public function __construct($connection='default')
     {
-        $this->config = config('redis.'.$config);
+        $this->config = config('redis.'.$connection);
 
         if ($this->config === null) {
-            throw new Exception("Unable to find config for redis '$config'.");
+            throw new Exception("Unable to find config for redis connection '$connection'.");
         }
 
         $this->connect();
