@@ -2,15 +2,12 @@
 
 namespace Wind\Redis;
 
-use Amp\Deferred;
-use Amp\Promise;
+use Amp\DeferredFuture as Deferred;
+use Amp\Future;
 use Wind\Base\Countdown;
 use Wind\Utils\ArrayUtil;
 use Workerman\Redis\Client;
 use Workerman\Redis\Exception;
-
-use function Amp\asyncCallable;
-use function Amp\await;
 
 /**
  * Redis 协程客户端
@@ -207,11 +204,11 @@ class Redis
     /**
      * Connect status
      *
-     * Promise: Connecting
+     * Future: Connecting
      * true: Connected
      * false: Connect failed
      *
-     * @var Promise|bool
+     * @var Future|bool
      */
     private $connector = false;
 
@@ -260,7 +257,7 @@ class Redis
             return true;
         }
 
-        if ($this->connector instanceof Promise) {
+        if ($this->connector instanceof Future) {
             return $this->connector;
         }
 
@@ -289,18 +286,18 @@ class Redis
             }
 
             //Success
-            $defer->resolve();
+            $defer->complete();
             $this->connector = true;
             return;
 
             Error:
-            $defer->fail($error);
+            $defer->error($error);
             $this->connector = false;
         }));
 
-        $this->connector = $defer->promise();
+        $this->connector = $defer->getFuture();
 
-        return await($this->connector);
+        return $this->connector->await();
     }
 
     public function close()
@@ -333,13 +330,13 @@ class Redis
 
         //将当前事务标记为下一个事务的前一个任务，让其等待此事务完成才能开始执行自己的事务
         $lastTrans = $this->lastTrans;
-        $this->lastTrans = $defer->promise();
+        $this->lastTrans = $defer->getFuture();
 
         ++$this->transCount;
 
         //等待前一个事务完成
         if ($lastTrans !== null) {
-            await($lastTrans);
+            $lastTrans->await();
             $lastTrans = null;
         }
 
@@ -359,14 +356,14 @@ class Redis
                 $this->pending = null;
             }
             --$this->transCount;
-            $defer->resolve();
+            $defer->complete();
         }
     }
 
     public function __call($name, $args)
     {
-        if ($this->connector instanceof Promise && $name != 'auth' && $name != 'select') {
-            await($this->connector);
+        if ($this->connector instanceof Future && $name != 'auth' && $name != 'select') {
+            $this->connector->await();
         }
 
         //等待队列中的事务完成后才开始发送消息
@@ -381,22 +378,22 @@ class Redis
             if ($this->pending === null) {
                 $this->pending = new Countdown($this->transCount);
             }
-            await($this->pending->promise());
+            $this->pending->getFuture()->await();
         }
 
         $defer = new Deferred;
 
         $args[] = static function($result, $redis) use ($defer) {
             if ($result !== false) {
-                $defer->resolve($result);
+                $defer->complete($result);
             } else {
-                $defer->fail(new Exception($redis->error()));
+                $defer->error(new Exception($redis->error()));
             }
         };
 
         call_user_func_array([$this->redis, $name], $args);
 
-        return await($defer->promise());
+        return $defer->getFuture()->await();
     }
 
 }
