@@ -2,7 +2,7 @@
 
 namespace Wind\Redis;
 
-use Amp\Deferred;
+use Amp\DeferredFuture;
 use Amp\Promise;
 use Workerman\Redis\Client;
 
@@ -28,15 +28,15 @@ class Transaction
 
     public function __call($name, $args)
     {
-        $defer = new Deferred;
+        $defer = new DeferredFuture;
 
         $args[] = static function($result) use ($defer) {
-            $defer->resolve($result);
+            $defer->complete($result);
         };
 
         call_user_func_array([$this->redis, $name], $args);
 
-        return await($defer->promise());
+        return $defer->getFuture()->await();
     }
 
 }
