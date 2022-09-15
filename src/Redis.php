@@ -2,39 +2,35 @@
 
 namespace Wind\Redis;
 
-use Amp\DeferredFuture as Deferred;
-use Amp\Future;
-use Wind\Base\Countdown;
-use Wind\Utils\ArrayUtil;
-use Workerman\Redis\Client;
-use Workerman\Redis\Exception;
+use Amp\DeferredFuture;
+use Revolt\EventLoop;
+use SplQueue;
+use Workerman\Connection\AsyncTcpConnection;
+use Workerman\Timer;
 
 /**
- * Redis 协程客户端
+ * Wind Redis Client
  *
  * Strings methods
  * @method int append($key, $value)
  * @method int bitCount($key)
+ * @method int decr($key)
  * @method int decrBy($key, $value)
  * @method string|bool get($key)
  * @method int getBit($key, $offset)
  * @method string getRange($key, $start, $end)
  * @method string getSet($key, $value)
+ * @method int incr($key)
  * @method int incrBy($key, $value)
  * @method float incrByFloat($key, $value)
  * @method array mGet(array $keys)
- * @method void mSet(array $keys)
- * @method void mSetNx(array $keys)
  * @method array getMultiple(array $keys)
- * @method bool set($key, $value)
  * @method bool setBit($key, $offset, $value)
  * @method bool setEx($key, $ttl, $value)
  * @method bool pSetEx($key, $ttl, $value)
  * @method bool setNx($key, $value)
  * @method string setRange($key, $offset, $value)
  * @method int strLen($key)
- * @method int incr($key)
- * @method int decr($key)
  * Keys methods
  * @method int del(...$keys)
  * @method int unlink(...$keys)
@@ -61,9 +57,6 @@ use Workerman\Redis\Exception;
  * @method false|int hSet($key, $hashKey, $value)
  * @method bool hSetNx($key, $hashKey, $value)
  * @method false|string hGet($key, $hashKey)
- * @method array hMSet($key, array $array)
- * @method array hMGet($key, array $array)
- * @method array hGetAll($key)
  * @method false|int hLen($key)
  * @method false|int hDel($key, ...$hashKeys)
  * @method array hKeys($key)
@@ -130,7 +123,6 @@ use Workerman\Redis\Exception;
  * @method double zScore($key, $member)
  * @method int zunionstore($keyOutput, $arrayZSetKeys, $arrayWeights = [], $aggregateFunction = '')
  * @method false|array zScan($key, $iterator, $pattern = '', $count = 0)
- * @method void sort($key, $options)
  * HyperLogLogs methods
  * @method int pfAdd($key, $values)
  * @method int pfCount($keys)
@@ -147,8 +139,8 @@ use Workerman\Redis\Exception;
  * @method string xAdd($strKey, $strId, $arrMessage, $iMaxLen = 0, $booApproximate = false)
  * @method array xClaim($strKey, $strGroup, $strConsumer, $minIdleTime, $arrIds, $arrOptions = [])
  * @method int xDel($strKey, $arrIds)
- * @method void xGroup($command, $strKey, $strGroup, $strMsgId, $booMKStream = null)
- * @method void xInfo($command, $strStream, $strGroup = null)
+ * @method mixed xGroup($command, $strKey, $strGroup, $strMsgId, $booMKStream = null)
+ * @method mixed xInfo($command, $strStream, $strGroup = null)
  * @method int xLen($stream)
  * @method array xPending($strStream, $strGroup, $strStart = 0, $strEnd = 0, $iCount = 0, $strConsumer = null)
  * @method array xRange($strStream, $strStart, $strEnd, $iCount = 0)
@@ -157,243 +149,578 @@ use Workerman\Redis\Exception;
  * @method array xRevRange($strStream, $strEnd, $strStart, $iCount = 0)
  * @method int xTrim($strStream, $iMaxLen, $booApproximate = null)
  * Pub/sub methods
- * @method void publish($channel, $message)
- * @method void pubSub($keyword, $argument = null)
+ * @method mixed publish($channel, $message)
+ * @method mixed pubSub($keyword, $argument = null)
  * Generic methods
- * @method void rawCommand(...$commandAndArgs)
+ * @method mixed rawCommand(...$commandAndArgs)
  * Transactions methods
- * @method void watch($keys)
- * @method void unwatch($keys)
+ * @method mixed multi()
+ * @method mixed exec()
+ * @method mixed discard()
+ * @method mixed watch($keys)
+ * @method mixed unwatch($keys)
  * Scripting methods
- * @method mixed eval($script, $numKeys, ...$args=[])
- * @method mixed evalSha($sha1, $numKeys, ...$args=[])
- * @method void script($command, ...$scripts)
- * @method void client(...$args)
- * @method null|string getLastError()
- * @method bool clearLastError()
- * @method void _prefix($value)
- * @method void _serialize($value)
- * @method void _unserialize($value)
- * Introspection methods
- * @method bool isConnected()
- * @method void getHost()
- * @method void getPort()
- * @method false|int getDbNum()
- * @method false|double getTimeout()
- * @method void getReadTimeout()
- * @method void getPersistentID()
- * @method void getAuth()
- * @method void select($db)
+ * @method mixed eval($script, $args = [], $numKeys = 0)
+ * @method mixed evalSha($sha, $args = [], $numKeys = 0)
+ * @method mixed script($command, ...$scripts)
+ * @method mixed client(...$args)
+ * @method string getLastError()
  */
 class Redis
 {
 
-    /**
-     * Workerman Redis Client
-     * @var Client
-     */
-    private $redis;
+    private AsyncTcpConnection $connection;
+
+    private int $status = 0;
+
+    private const STATUS_CLOSED = 0;
+    private const STATUS_CONNECTING = 1;
+    private const STATUS_CONNECTED = 2;
+
+    private ?DeferredFuture $connectDeferred;
+
+    private array $config = [];
+
+    private SplQueue $queue;
+    private bool $queuePaused = true;
 
     /**
-     * Redis host config
-     *
-     * @var array
-     */
-    private $config;
-
-    /**
-     * Connect status
-     *
-     * Future: Connecting
-     * true: Connected
-     * false: Connect failed
-     *
-     * @var Future|bool
-     */
-    private $connector = false;
-
-    private $lastTrans;
-
-    /**
-     * 当前有多少正在排队、执行中的事务
-     *
      * @var int
      */
-    private $transCount = 0;
+    private $db = 0;
 
     /**
-     * MULTI Transaction Countdown before call
-     *
-     * @var Countdown|null
+     * @var string|array
      */
-    private $pending;
+    private $password = null;
+
+    /**
+     * @var string
+     */
+    private $lastError = '';
+
+    /**
+     * @var array
+     */
+    private $subscribes = [];
+
+    private ?Command $pending = null;
 
     /**
      * Create redis connection instance
      *
-     * @param string $connection Redis connection config index name.
+     * @param string|array $connection Redis connection config index name or config array.
      */
     public function __construct($connection='default')
     {
-        $this->config = config('redis.'.$connection);
+        $this->config = is_array($connection) ? $connection : config('redis.'.$connection);
 
         if ($this->config === null) {
             throw new Exception("Unable to find config for redis connection '$connection'.");
         }
 
+        if (!\class_exists('Protocols\Redis')) {
+            \class_alias('Wind\Redis\Protocol', 'Protocols\Redis');
+        }
+
+        $address = 'redis://'.$this->config['host'].':'.($this->config['port'] ?? 6379);
+        $this->connection = new AsyncTcpConnection($address, $this->config['context'] ?? []);
+
+        $this->queue = new SplQueue;
+        $this->queue->setIteratorMode(SplQueue::IT_MODE_DELETE);
+
         $this->connect();
     }
 
     /**
-     * Connect to redis
+     * connect
      *
-     * Connect to redis if redis is not connect or connect already failed.
-     *
-     * @return bool
+     * @return void
      */
     public function connect()
     {
-        if ($this->connector === true) {
-            return true;
-        }
-
-        if ($this->connector instanceof Future) {
-            return $this->connector;
-        }
-
-        $defer = new Deferred;
-
-        $options = ArrayUtil::intersectKeys($this->config, ['connect_timeout', 'wait_timeout', 'context']);
-
-        $this->redis = new Client("redis://{$this->config['host']}:{$this->config['port']}", $options, asyncCallable(function($status) use ($defer) {
-            $error = null;
-
-            if (!$status) {
-                $error = new Exception($this->redis->error());
-                goto Error;
-            }
-
-            if ($this->config['auth'] || $this->config['db']) {
-                try {
-                    //Password auth
-                    $this->config['auth'] && $this->auth($this->config['auth']);
-                    //Select DB
-                    $this->config['db'] && $this->select($this->config['db']);
-                } catch (\Throwable $e) {
-                    $error = $e;
-                    goto Error;
-                }
-            }
-
-            //Success
-            $defer->complete();
-            $this->connector = true;
+        if ($this->isConnected()) {
             return;
-
-            Error:
-            $defer->error($error);
-            $this->connector = false;
-        }));
-
-        $this->connector = $defer->getFuture();
-
-        return $this->connector->await();
-    }
-
-    public function close()
-    {
-        $this->redis->close();
-        return true;
-    }
-
-    /**
-     * Begin Transaction use Multi
-     *
-     * Other operate with this redis connection will be block until transaction finished.
-     *
-     * @param callable $inTransactionCallback Callback to run in transaction code, support coroutine.
-     *
-     * ATTENTION: **DO NOT** get value by redis client in transaction, every operate in transaction will return `QUEUED`.
-     *
-     * Example:
-     * ```
-     * $redis->transaction(function($transaction) {
-     *     $transaction->hSet('key', 'name', 'value');
-     *     $this->lPush('key', 'value');
-     * });
-     * ```
-     * @return array Return the results of every command in $inTransactionCallback returned.
-     */
-    public function transaction(callable $inTransactionCallback)
-    {
-        $defer = new Deferred;
-
-        //将当前事务标记为下一个事务的前一个任务，让其等待此事务完成才能开始执行自己的事务
-        $lastTrans = $this->lastTrans;
-        $this->lastTrans = $defer->getFuture();
-
-        ++$this->transCount;
-
-        //等待前一个事务完成
-        if ($lastTrans !== null) {
-            $lastTrans->await();
-            $lastTrans = null;
         }
 
-        $transaction = new Transaction($this->redis);
-        $transaction->multi();
+        $timeout = $this->config['connect_timeout'] ?? 5;
+        $reconnect = $this->config['auto_reconnect'] ?? true;
 
-        try {
-            $result = $inTransactionCallback($transaction);
-            $transaction->exec();
-            return $result;
-        } catch (\Throwable $e) {
-            $transaction->discard();
-            throw $e;
-        } finally {
-            //每个事务完成后都减小独立命令（非事务命令）的前置等待事务数计数
-            if ($this->pending !== null && $this->pending->countdown() == 0) {
-                $this->pending = null;
+        //连接超时设置
+        $connectTimer = Timer::add($timeout, function() {
+            $this->connection->destroy();
+            $this->connectDeferred?->error(new Exception('Connect to redis timeout.'));
+            $this->connectDeferred = null;
+        }, [], false);
+
+        $this->connection->onConnect = function () use (&$connectTimer, $reconnect) {
+            if ($connectTimer) {
+                Timer::del($connectTimer);
+                $connectTimer = null;
             }
-            --$this->transCount;
-            $defer->complete();
-        }
-    }
 
-    public function __call($name, $args)
-    {
-        if ($this->connector instanceof Future && $name != 'auth' && $name != 'select') {
-            $this->connector->await();
-        }
+            try {
+                echo "Auth...\n";
+                if ($this->password || !empty($this->config['auth'])) {
+                    $this->auth($this->password ?: $this->config['auth']);
+                }
 
-        //等待队列中的事务完成后才开始发送消息
-        //如果事务未完成，由于共用一个消息，此时发送会导致命令实际在 MULTI 生效范围内发送，
-        //这种情况下会导致返回 "QUEUED" 问题。
-        if ($this->transCount > 0) {
-            //如果没有命令等待，则以当前排队的事务数为基数进行倒数，每个事务执行完后会减小此倒数
-            //这样做法的好处是不必反复等待后面新排队进来的事务，而只需等待这一刻之前的事务完成即可
-            //但有个问题，如果后面有新排队进来的事务，且前面的事务没有完成前，再往后排进来的独立命令都会加塞到此处执行，
-            //导致后面的事务靠后执行，因为这种方式只支持一份独立命令的排队($this->>pending)
-            //不过庆幸的是，前面的事务一旦执行完成，这个问题就会终止，新来的独立命令会继续往后排。
-            if ($this->pending === null) {
-                $this->pending = new Countdown($this->transCount);
-            }
-            $this->pending->getFuture()->await();
-        }
+                echo "Select db...\n";
+                if ($this->db || isset($this->config['db'])) {
+                    $this->select($this->db ?: $this->config['db']);
+                }
 
-        $defer = new Deferred;
+                $this->lastError = '';
+                $this->status = self::STATUS_CONNECTED;
+                $this->connectDeferred->complete();
+                $this->connectDeferred = null;
 
-        $args[] = static function($result, $redis) use ($defer) {
-            if ($result !== false) {
-                $defer->complete($result);
-            } else {
-                $defer->error(new Exception($redis->error()));
+                $this->queuePaused = false;
+                $this->process();
+
+            } catch (Exception $e) {
+                $this->connectDeferred?->error($e);
+                $this->connectDeferred = null;
             }
         };
 
-        call_user_func_array([$this->redis, $name], $args);
+        $this->connection->onError = function ($connection, $code, $message) use (&$connectTimer, $reconnect) {
+            if ($connectTimer) {
+                Timer::del($connectTimer);
+                $connectTimer = null;
+            }
 
-        return $defer->getFuture()->await();
+            $msg = "[$code] $message";
+            $this->lastError = $msg;
+        };
+
+        $this->connection->onClose = function () use (&$connectTimer, $reconnect) {
+            if ($connectTimer) {
+                Timer::del($connectTimer);
+                $connectTimer = null;
+            }
+
+            $this->queuePaused = true;
+
+            if ($reconnect) {
+                //将当前队列的内容先重新放进队列
+                if ($this->pending) {
+                    $this->queue->enqueue($this->pending);
+                    $this->pending = null;
+                }
+
+                //自动重连时等待并尝试重连
+                $reconnectDelay = $this->config['reconnect_delay'] ?? 2;
+                echo "Reconnect after {$reconnectDelay} seconds cause: {$this->lastError}.\n";
+                $this->status = self::STATUS_CONNECTING;
+                Timer::add($reconnectDelay, fn() => EventLoop::queue($this->connect(...)), [], false);
+            } else {
+                $error = new Exception($this->lastError ?: 'Disconnected.');
+                $this->status = self::STATUS_CLOSED;
+
+                //不自动重连时，所有队列都报连接关闭错误
+                if ($this->pending) {
+                    $this->pending->error($error);
+                    $this->pending = null;
+                }
+
+                while (!$this->queue->isEmpty()) {
+                    $pending = $this->queue->dequeue();
+                    $pending->error($error);
+                }
+
+                $this->connectDeferred?->error($error);
+                $this->connectDeferred = null;
+            }
+        };
+
+        $this->connection->onMessage = function ($connection, $data) {
+            [$type, $result] = $data;
+
+            //!号代表协议解析错误
+            if ($type !== '-' && $type !== '!') {
+                $this->lastError = '';
+
+                if ($type === '+' && $result === 'OK') {
+                    $result = true;
+                } elseif (is_array($result) && ($result[0] == 'message' || $result[0] == 'pmessage')) {
+                    //来自订阅的消息
+                    $channel = $result[1];
+                    if (isset($this->subscribes[$channel])) {
+                        $this->subscribes[$channel](array_slice($result, 1));
+                    } else {
+                        echo "Unknown subscribe of channel {$channel}.\n";
+                    }
+                    return;
+                }
+            } else {
+                $this->lastError = $result;
+                $result = false;
+            }
+
+            if ($this->pending) {
+                if ($result !== false) {
+                    $this->pending->complete($result);
+                } else {
+                    $this->pending->error(new Exception($this->lastError));
+                }
+                $this->pending = null;
+            }
+
+            if ($type === '!') {
+                $this->close();
+                $this->connect();
+            } else {
+                $this->process();
+            }
+        };
+
+        $this->connectDeferred ??= new DeferredFuture();
+        $this->status = self::STATUS_CONNECTING;
+
+        EventLoop::defer($this->connection->connect(...));
+
+        $this->connectDeferred->getFuture()->await();
+    }
+
+    public function isConnected()
+    {
+        return $this->status == self::STATUS_CONNECTED;
+    }
+
+    /**
+     * process
+     */
+    protected function process()
+    {
+        if (!$this->isConnected() || $this->pending || $this->queue->isEmpty()) {
+            return;
+        }
+
+        /** @var Command $cmd */
+        $cmd = $this->queue->dequeue();
+        $this->connection->send($cmd->buffer());
+        $this->pending = $cmd;
+    }
+
+    public function select($db)
+    {
+        $result = $this->__call('SELECT', [$db]);
+        $this->db = $db;
+        return $result;
+    }
+
+    public function auth($password)
+    {
+        $result = $this->__call('AUTH', [$password]);
+        $this->password = $password;
+        return $result;
+    }
+
+    /**
+     * subscribe
+     *
+     * @param callable $callback
+     * @param array $channels
+     */
+    public function subscribe($callback , ...$channels)
+    {
+        $result = $this->__call('SUBSCRIBE', $channels);
+        foreach ($channels as $ch) {
+            $this->subscribes[$ch] = $callback;
+        }
+        return $result;
+    }
+
+    public function unsubscribe(...$channels)
+    {
+        $result = $this->__call('UNSUBSCRIBE', $channels);
+        foreach ($channels as $ch) {
+            unset($this->subscribes[$ch]);
+        }
+        return $result;
+    }
+
+    /**
+     * psubscribe
+     *
+     * @param $patterns
+     * @param $cb
+     */
+    public function pSubscribe($callback, ...$patterns)
+    {
+        $result = $this->__call('PSUBSCRIBE', $patterns);
+        foreach ($patterns as $ch) {
+            $this->subscribes[$ch] = $callback;
+        }
+        return $result;
+    }
+
+    public function pUnsubscribe($patterns)
+    {
+        $result = $this->__call('PUNSUBSCRIBE', $patterns);
+        foreach ($patterns as $ch) {
+            unset($this->subscribes[$ch]);
+        }
+        return $result;
+    }
+
+    /**
+     * set
+     *
+     * @param string $key
+     * @param string $value
+     * @param int $ex
+     * @param int $px
+     * @param string $opt NX or XX
+     * @return bool
+     */
+    public function set($key, $value, $ex=null, $px=null, $opt=null)
+    {
+        $args = [$key, $value];
+        $ex !== null && array_push($args, 'EX', $ex);
+        $px !== null && array_push($args, 'PX', $px);
+        $opt && $args[] = $opt;
+        return $this->__call('SET', $args);
+    }
+
+    /**
+     * sort
+     *
+     * @param $key
+     * @param $options
+     * @param null $cb
+     */
+    function sort($key, $options)
+    {
+        $args = [$key];
+        if (isset($options['sort'])) {
+            $args[] = $options['sort'];
+            unset($options['sort']);
+        }
+
+        foreach ($options as $op => $value) {
+            $args[] = $op;
+            if (!is_array($value)) {
+                $args[] = $value;
+                continue;
+            }
+            foreach ($value as $sub_value) {
+                $args[] = $sub_value;
+            }
+        }
+
+        return $this->__call('SORT', $args);
+    }
+
+    /**
+     * mSet
+     *
+     * @param array $array
+     * @return bool
+     */
+    public function mSet(array $array)
+    {
+        return $this->mapCb('MSET', $array);
+    }
+
+    /**
+     * mSetNx
+     *
+     * @param array $array
+     * @return int
+     */
+    public function mSetNx(array $array)
+    {
+        return $this->mapCb('MSETNX', $array);
+    }
+
+    /**
+     * mapCb
+     *
+     * @param string $command
+     * @param array $array
+     * @return mixed
+     */
+    protected function mapCb($command, array $array)
+    {
+        $args = [$command];
+        foreach ($array as $key => $value) {
+            $args[] = $key;
+            $args[] = $value;
+        }
+        return $this->__call($command, $args);
+    }
+
+    /**
+     * hMSet
+     *
+     * @param string $key
+     * @param array $array
+     * @return bool
+     */
+    public function hMSet($key, array $array)
+    {
+        $args = [$key];
+
+        foreach ($array as $k => $v) {
+            array_push($args, $k, $v);
+        }
+
+        return $this->__call('HMSET', $args);
+    }
+
+    /**
+     * hMGet
+     *
+     * @param $key
+     * @param array $fields
+     * @return array
+     */
+    public function hMGet($key, array $fields)
+    {
+        $result = $this->__call('HMGET', array_merge($key, $fields));
+        if (!is_array($result)) {
+            return $result;
+        }
+        return array_combine($fields, $result);
+    }
+
+    /**
+     * hGetAll
+     *
+     * @param $key
+     * @param null $cb
+     */
+    public function hGetAll($key)
+    {
+        $result = $this->__call('HGETALL', [$key]);
+
+        if (!is_array($result)) {
+            return $result;
+        }
+
+        $data = [];
+
+        foreach (array_chunk($result, 2) as $row) {
+            list($k, $v) = $row;
+            $data[$k] = $v;
+        }
+
+        return $data;
+    }
+
+    /**
+     * 事务
+     */
+    public function transaction(callable $inTransactionCallback)
+    {
+        $this->multi();
+        $this->queuePaused = true;
+        try {
+            $inTransactionCallback($this);
+            $this->exec();
+        } catch (\Throwable $e) {
+            $this->discard();
+        }
+        $this->queuePaused = false;
+    }
+
+    /**
+     * 添加命令到队列
+     *
+     * @param $method
+     * @param $args
+     * @return mixed
+     */
+    public function __call($method, $args)
+    {
+        if ($this->status == self::STATUS_CLOSED) {
+            throw new Exception($this->lastError ?: 'Lost connection.');
+        }
+
+        $cmd = new Command($method, $args);
+
+        //当处于普通命令时，命令全部都队列机制，当系统连接、处理事务中时，则整个连接是原子性的，此时不走命令机制，且队列被暂停
+        if (!$this->queuePaused) {
+            $this->queue->enqueue($cmd);
+            $this->process();
+        } else {
+            $this->connection->send([$method, ...$args]);
+            $this->pending = $cmd;
+        }
+
+        return $cmd->await();
+    }
+
+    /**
+     * error
+     *
+     * @return string
+     */
+    public function getLastError()
+    {
+        return $this->lastError;
+    }
+
+    /**
+     * close
+     */
+    public function close()
+    {
+        if (!$this->connection) {
+            return;
+        }
+
+        $this->subscribes = [];
+        $this->connection->onConnect = $this->connection->onError = $this->connection->onClose =
+        $this->connection->onMessge = null;
+        $this->connection->close();
+    }
+
+    public function __destruct()
+    {
+        $this->close();
+    }
+
+    /**
+     * scan
+     *
+     * @throws Exception
+     */
+    public function scan()
+    {
+        throw new Exception('Not implemented');
+    }
+
+    /**
+     * hScan
+     *
+     * @throws Exception
+     */
+    public function hScan()
+    {
+        throw new Exception('Not implemented');
+    }
+
+    /**
+     * hScan
+     *
+     * @throws Exception
+     */
+    public function sScan()
+    {
+        throw new Exception('Not implemented');
+    }
+
+    /**
+     * hScan
+     *
+     * @throws Exception
+     */
+    public function zScan()
+    {
+        throw new Exception('Not implemented');
     }
 
 }
