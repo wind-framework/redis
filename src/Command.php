@@ -3,12 +3,18 @@
 namespace Wind\Redis;
 
 use Amp\DeferredFuture;
+use Closure;
 
 class Command {
 
-    private DeferredFuture $deferred;
+    public DeferredFuture $deferred;
 
-    public function __construct(public string $cmd, public array $args)
+    /**
+     * @param string $cmd
+     * @param array $args
+     * @param Closure $callback And atomic callback after current command and before next command.
+     */
+    public function __construct(public string $cmd, public array $args, private ?Closure $callback=null)
     {
         $this->deferred = new DeferredFuture();
     }
@@ -22,23 +28,12 @@ class Command {
         return [$this->cmd, ...$this->args];
     }
 
-    public function complete($result)
+    public function callback()
     {
-        $this->deferred->complete($result);
-    }
-
-    public function error($error)
-    {
-        $this->deferred->error($error);
-    }
-
-    /**
-     * @return mixed
-     */
-    public function await()
-    {
-        return $this->deferred->getFuture()->await();
+        if ($this->callback !== null) {
+            $closure = $this->callback;
+            $closure();
+        }
     }
 
 }
-
