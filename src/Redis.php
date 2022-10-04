@@ -190,7 +190,7 @@ class Redis
 
                 if ($type === '+' && $result === 'OK') {
                     $result = true;
-                } elseif (is_array($result) && ($result[0] == 'message' || $result[0] == 'pmessage')) {
+                } elseif (is_array($result) && $this->subscribes && ($result[0] == 'message' || $result[0] == 'pmessage')) {
                     //来自订阅的消息
                     $channel = $result[1];
                     if (isset($this->subscribes[$channel])) {
