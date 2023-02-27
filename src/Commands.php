@@ -154,8 +154,8 @@ namespace Wind\Redis;
  * @method mixed watch($keys)
  * @method mixed unwatch($keys)
  * Scripting methods
- * @method mixed eval($script, $args = [], $numKeys = 0)
- * @method mixed evalSha($sha, $args = [], $numKeys = 0)
+ * @method mixed eval($script, $numKeys = 0, ...$args)
+ * @method mixed evalSha($sha, $numKeys = 0, ...$args)
  * @method mixed script($command, ...$scripts)
  * @method mixed client(...$args)
  */

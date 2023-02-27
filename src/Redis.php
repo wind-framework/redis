@@ -107,12 +107,12 @@ class Redis
             }
 
             try {
-                echo "Auth...\n";
+                // echo "Auth...\n";
                 if ($this->password || !empty($this->config['auth'])) {
                     $this->auth($this->password ?: $this->config['auth']);
                 }
 
-                echo "Select db...\n";
+                // echo "Select db...\n";
                 if ($this->db || isset($this->config['db'])) {
                     $this->select($this->db ?: $this->config['db']);
                 }
