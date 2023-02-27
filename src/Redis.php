@@ -29,7 +29,7 @@ use function Amp\call;
  * @method Promise mSet(array $keys)
  * @method Promise mSetNx(array $keys)
  * @method Promise getMultiple(array $keys) array
- * @method Promise set($key, $value) bool
+ * @method Promise set($key, $value, $ex=null) bool
  * @method Promise setBit($key, $offset, $value) bool
  * @method Promise setEx($key, $ttl, $value) bool
  * @method Promise pSetEx($key, $ttl, $value) bool
@@ -168,8 +168,8 @@ use function Amp\call;
  * @method Promise watch($keys)
  * @method Promise unwatch($keys)
  * Scripting methods
- * @method Promise eval($script, $numKeys, ...$args=[])
- * @method Promise evalSha($sha1, $numKeys, ...$args=[])
+ * @method Promise eval($script, $numKeys, ...$args)
+ * @method Promise evalSha($sha1, $numKeys, ...$args)
  * @method Promise script($command, ...$scripts)
  * @method Promise client(...$args)
  * @method Promise getLastError() null|string
