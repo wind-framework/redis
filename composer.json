@@ -3,8 +3,8 @@
     "description": "Wind framework coroutine redis client.",
     "type": "library",
     "require": {
-        "wind-framework/wind-framework": "^0.2",
-        "workerman/redis": "^1.0"
+        "wind-framework/wind-framework": "~0.2",
+        "workerman/redis": "1.0.9"
     },
     "license": "Apache-2.0",
     "authors": [
