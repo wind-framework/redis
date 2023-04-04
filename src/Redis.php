@@ -29,7 +29,6 @@ use function Amp\call;
  * @method Promise mSet(array $keys)
  * @method Promise mSetNx(array $keys)
  * @method Promise getMultiple(array $keys) array
- * @method Promise set($key, $value, $ex=null) bool
  * @method Promise setBit($key, $offset, $value) bool
  * @method Promise setEx($key, $ttl, $value) bool
  * @method Promise pSetEx($key, $ttl, $value) bool
@@ -392,6 +391,24 @@ class Redis
 
             return $defer->promise();
         });
+    }
+
+    /**
+     * SET
+     *
+     * @param string $key
+     * @param string $value
+     * @param null|int $ttl
+     * @return Promise
+     */
+    public function set($key, $value, $ttl=null)
+    {
+        //使用独立方法，而不完全使用 __call 是因为 Workerman Redis Client 中如果第三个参数 $ttl 为空会导致无法传进回调函数，此处当 $ttl 为空时必须省略第三个参数
+        if ($ttl !== null) {
+            return $this->__call('set', func_get_args());
+        } else {
+            return $this->__call('set', [$key, $value]);
+        }
     }
 
 }
