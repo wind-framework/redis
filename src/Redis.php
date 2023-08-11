@@ -6,6 +6,7 @@ use Amp\DeferredFuture;
 use Revolt\EventLoop;
 use SplQueue;
 use Workerman\Connection\AsyncTcpConnection;
+use Workerman\Connection\TcpConnection;
 use Workerman\Timer;
 
 /**
@@ -337,6 +338,7 @@ class Redis
     /**
      * Start transaction
      *
+     * @param callable(Transaction) $inTransactionCallback
      * @return array Result of exec command
      */
     public function transaction(callable $inTransactionCallback)
@@ -360,7 +362,7 @@ class Redis
      * @param string $cmd
      * @param array $args
      * @param boolean $direct Directly send or into the queue
-     * @param Closure $callback Atomic callback, see Command
+     * @param \Closure $callback Atomic callback, see Command
      */
     public function call($cmd, $args, $direct=false, $callback=null)
     {
@@ -401,13 +403,12 @@ class Redis
      */
     public function close()
     {
-        if (!$this->connection) {
+        if ($this->connection->getStatus() == TcpConnection::STATUS_CLOSED) {
             return;
         }
 
         $this->subscribes = [];
-        $this->connection->onConnect = $this->connection->onError = $this->connection->onClose =
-        $this->connection->onMessage = null;
+        $this->connection->onConnect = $this->connection->onError = $this->connection->onClose = $this->connection->onMessage = null;
         $this->connection->close();
     }
 
