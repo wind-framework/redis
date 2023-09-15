@@ -10,7 +10,7 @@ class Transaction
 
     use Commands;
 
-    public function __construct(private Redis $redis)
+    public function __construct(private Redis|Client $redis)
     {
     }
 

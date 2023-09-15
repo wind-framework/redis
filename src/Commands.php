@@ -148,9 +148,6 @@ namespace Wind\Redis;
  * Generic methods
  * @method mixed rawCommand(...$commandAndArgs)
  * Transactions methods
- * @method mixed multi()
- * @method mixed exec()
- * @method mixed discard()
  * @method mixed watch($keys)
  * @method mixed unwatch($keys)
  * Scripting methods
@@ -241,7 +238,7 @@ trait Commands
      */
     protected function mapCb($command, array $array)
     {
-        $args = [$command];
+        $args = [];
         foreach ($array as $key => $value) {
             $args[] = $key;
             $args[] = $value;
