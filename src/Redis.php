@@ -108,22 +108,24 @@ class Redis
             }
 
             try {
-                // echo "Auth...\n";
                 if ($this->password || !empty($this->config['auth'])) {
+                    // echo "Auth...\n";
                     $this->auth($this->password ?: $this->config['auth']);
                 }
 
-                // echo "Select db...\n";
                 if ($this->db || isset($this->config['db'])) {
+                    // echo "Select db...\n";
                     $this->select($this->db ?: $this->config['db']);
                 }
 
                 $this->lastError = '';
                 $this->status = self::STATUS_CONNECTED;
+
                 $this->connectDeferred->complete();
                 $this->connectDeferred = null;
 
                 $this->queuePaused = false;
+
                 $this->process();
 
             } catch (Exception $e) {
@@ -207,13 +209,16 @@ class Redis
             }
 
             if ($this->pending) {
-                if ($result !== false) {
-                    $this->pending->deferred->complete($result);
-                } else {
-                    $this->pending->deferred->error(new Exception($this->lastError));
-                }
-                $this->pending->callback();
+                $pending = $this->pending;
                 $this->pending = null;
+
+                if ($result !== false) {
+                    $pending->deferred->complete($result);
+                } else {
+                    $pending->deferred->error(new Exception($this->lastError));
+                }
+
+                $pending->callback();
             }
 
             if ($type === '!') {
@@ -254,14 +259,14 @@ class Redis
 
     public function select($db)
     {
-        $result = $this->call('SELECT', [$db]);
+        $result = $this->call('SELECT', [$db], $this->status == self::STATUS_CONNECTING);
         $this->db = $db;
         return $result;
     }
 
     public function auth($password)
     {
-        $result = $this->call('AUTH', [$password]);
+        $result = $this->call('AUTH', [$password], $this->status == self::STATUS_CONNECTING);
         $this->password = $password;
         return $result;
     }
