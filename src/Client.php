@@ -85,31 +85,52 @@ class Client
         $address = $this->config['host'].':'.($this->config['port'] ?? 6379);
         $timeout = $this->config['connect_timeout'] ?? 5;
 
-        //Todo: reconnect
-        $reconnect = $this->config['auto_reconnect'] ?? true;
-
         $connectContext = (new ConnectContext)
             ->withConnectTimeout($timeout);
 
-        $this->socket = connect($address, $connectContext);
+        try {
+            $this->socket = connect($address, $connectContext);
+        } catch (\Throwable $e) {
+
+            $reconnect = $this->config['auto_reconnect'] ?? true;
+
+            if ($reconnect) {
+                $reconnectDelay = $this->config['reconnect_delay'] ?? 2;
+                echo "Redis reconnect after {$reconnectDelay} seconds cause: {$e->getMessage()}.\n";
+                EventLoop::delay($reconnectDelay, $this->connect(...));
+                return;
+            } else {
+                throw $e;
+            }
+        }
+
+        // $this->socket->onClose(function() {
+        //     echo "Redis connection closed\n";
+        // });
 
         if ($this->password || !empty($this->config['auth'])) {
             $this->auth($this->password ?: $this->config['auth']);
         }
 
         $this->status = self::STATUS_CONNECTED;
+
+        //重新恢复队列
+        if ($this->queuePaused) {
+            $this->queuePaused = false;
+            $this->process();
+        }
     }
 
     public function auth($password)
     {
-        $result = $this->call('AUTH', [$password]);
+        $result = $this->call('AUTH', [$password], $this->status == self::STATUS_CONNECTING);
         $this->password = $password;
         return $result;
     }
 
     public function select($db)
     {
-        $result = $this->call('SELECT', [$db]);
+        $result = $this->call('SELECT', [$db], $this->status == self::STATUS_CONNECTING);
         $this->db = $db;
         return $result;
     }
@@ -233,6 +254,9 @@ class Client
 
         EventLoop::queue(function() {
             while (!$this->queue->isEmpty()) {
+                if ($this->queuePaused) {
+                    break;
+                }
                 /** @var Command $command */
                 $cmd = $this->queue->dequeue();
                 $this->execCommand($cmd);
@@ -247,6 +271,23 @@ class Client
 
         $this->socket->write($cmd->__toString());
         $buffer = $this->socket->read();
+
+        if ($buffer === null) {
+            echo "Redis connection is closed\n";
+            echo 'Readable: '.($this->socket->isReadable() ? 'true' : 'false')."\n";
+            echo 'Writeable: '.($this->socket->isWritable() ? 'true' : 'false')."\n";
+            echo 'IsClosed: '.($this->socket->isClosed() ? 'true' : 'false')."\n";
+
+            $this->queuePaused = true;
+            $this->queue->enqueue($cmd);
+
+            $this->socket->close();
+            $this->status = self::STATUS_CLOSED;
+
+            $this->connect();
+
+            return;
+        }
 
         [$type, $data] = $this->decode($buffer);
 
@@ -275,7 +316,7 @@ class Client
             case '-':
                 return [$type, \substr($buffer, 1, strlen($buffer) - 3)];
             case '$':
-                if(0 === strpos($buffer, '$-1')) {
+                if (0 === strpos($buffer, '$-1')) {
                     return [$type, null];
                 }
                 $pos = \strpos($buffer, "\r\n");
