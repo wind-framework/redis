@@ -4,9 +4,8 @@ namespace Wind\Redis;
 
 use Amp\Socket\ConnectContext;
 use Amp\Socket\Socket;
+use Amp\Socket\SocketConnector;
 use Wind\Socket\SimpleTextClient;
-
-use function Amp\Socket\connect;
 
 /**
  * Wind Framework Redis Client
@@ -60,15 +59,15 @@ class Client extends SimpleTextClient
         $this->connect();
     }
 
-    protected function createSocket(): Socket
+    protected function createSocket(SocketConnector $connector): Socket
     {
-        $address = $this->config['host'].':'.($this->config['port'] ?? 6379);
+        $address = 'tcp://'.$this->config['host'].':'.($this->config['port'] ?? 6379);
         $timeout = $this->config['connect_timeout'] ?? 5;
 
         $connectContext = (new ConnectContext)
             ->withConnectTimeout($timeout);
 
-        return connect($address, $connectContext);
+        return $connector->connect($address, $connectContext);
     }
 
     protected function authenticate()
