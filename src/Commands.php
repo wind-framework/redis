@@ -10,7 +10,7 @@ namespace Wind\Redis;
  * @method int bitCount($key)
  * @method int decr($key)
  * @method int decrBy($key, $value)
- * @method string|bool get($key)
+ * @method string|null get($key)
  * @method int getBit($key, $offset)
  * @method string getRange($key, $start, $end)
  * @method string getSet($key, $value)
