@@ -18,9 +18,9 @@ class Redis extends SimpleTextClient
     private array $config = [];
 
     /**
-     * @var int
+     * @var null|int
      */
-    private $db = 0;
+    private $db = null;
 
     /**
      * @var string|array|null
@@ -76,7 +76,11 @@ class Redis extends SimpleTextClient
             $this->auth($this->password ?: $this->config['auth']);
         }
 
-        $this->select($this->db);
+        $db = $this->db ?? $this->config['db'] ?? null;
+
+        if ($db !== null) {
+            $this->select($db);
+        }
     }
 
     public function auth($password)
