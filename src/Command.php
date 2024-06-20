@@ -5,9 +5,10 @@ namespace Wind\Redis;
 use Amp\DeferredFuture;
 use Amp\Future;
 use Closure;
+use Wind\Socket\AtomicCallback;
 use Wind\Socket\SimpleTextCommand;
 
-class Command implements SimpleTextCommand {
+class Command implements SimpleTextCommand, AtomicCallback {
 
     public DeferredFuture $deferred;
 
@@ -146,8 +147,7 @@ class Command implements SimpleTextCommand {
     public function callback()
     {
         if ($this->callback !== null) {
-            $closure = $this->callback;
-            $closure();
+            call_user_func($this->callback);
         }
     }
 

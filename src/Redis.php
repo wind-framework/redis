@@ -148,20 +148,19 @@ class Redis extends SimpleTextClient
 
     protected function multi()
     {
-        $this->call('MULTI');
-        $this->queuePaused = true;
+        $this->call('MULTI', callback: fn() => $this->queuePaused = true);
     }
 
     protected function exec()
     {
-        $arr = $this->call('EXEC', direct: true);
+        $arr = $this->call('EXEC', withoutQueue: true);
         $this->queuePaused = false;
         return $arr;
     }
 
     protected function discard()
     {
-        $this->call('DISCARD', direct: true);
+        $this->call('DISCARD', withoutQueue: true);
         $this->queuePaused = false;
     }
 
@@ -187,9 +186,9 @@ class Redis extends SimpleTextClient
         }
     }
 
-    public function call($cmd, $args=[], $direct=false)
+    public function call($cmd, $args=[], $withoutQueue=false, ?\Closure $callback=null)
     {
-        return $this->execute(new Command($cmd, $args), $direct);
+        return $this->execute(new Command($cmd, $args, $callback), $withoutQueue);
     }
 
     public function __call($method, $args)
