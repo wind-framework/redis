@@ -211,12 +211,11 @@ class Redis extends SimpleTextClient
 
     protected function bytes(string $buffer): int
     {
-        $type = $buffer[0];
         $pos = strpos($buffer, "\r\n");
         if (false === $pos) {
             return 0;
         }
-        switch ($type) {
+        switch ($buffer[0]) {
             case ':':
             case '+':
             case '-':
