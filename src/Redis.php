@@ -209,4 +209,59 @@ class Redis extends SimpleTextClient
         $this->close();
     }
 
+    protected function bytes(string $buffer): int
+    {
+        $type = $buffer[0];
+        $pos = strpos($buffer, "\r\n");
+        if (false === $pos) {
+            return 0;
+        }
+        switch ($type) {
+            case ':':
+            case '+':
+            case '-':
+                return $pos + 2;
+            case '$':
+                if(0 === strpos($buffer, '$-1')) {
+                    return 5;
+                }
+                return $pos + 4 + (int)substr($buffer, 1, $pos);
+            case '*':
+                if(0 === strpos($buffer, '*-1')) {
+                    return 5;
+                }
+                $count = (int)substr($buffer, 1, $pos - 1);
+                while ($count --) {
+                    $next_pos = strpos($buffer, "\r\n", $pos + 2);
+                    if (!$next_pos) {
+                        return 0;
+                    }
+                    $sub_type = $buffer[$pos + 2];
+                    switch ($sub_type) {
+                        case ':':
+                        case '+':
+                        case '-':
+                            $pos = $next_pos;
+                            break;
+                        case '$':
+                            if($pos + 2 === strpos($buffer, '$-1', $pos)) {
+                                $pos = $next_pos;
+                                break;
+                            }
+                            $length = (int)substr($buffer, $pos + 3, $next_pos - $pos -3);
+                            $pos = $next_pos + $length + 2;
+                            if (strlen($buffer) < $pos) {
+                                return 0;
+                            }
+                            break;
+                        default:
+                            return \strlen($buffer);
+                    }
+                }
+                return $pos + 2;
+            default:
+                return \strlen($buffer);
+        }
+    }
+
 }
