@@ -55,8 +55,6 @@ class Redis extends SimpleTextClient
         if (isset($this->config['reconnect_delay'])) {
             $this->reconnectDelay = $this->config['reconnect_delay'];
         }
-
-        $this->connect();
     }
 
     protected function createSocket(SocketConnector $connector): Socket
